@@ -46,18 +46,103 @@ def index():
     if 'credentials' not in session:
         return redirect(url_for('authorize'))
     return '''
-    <!-- HTML stays the same -->
-    <html>
-    <head><title>Drive Copier</title></head>
-    <body>
+<html>
+<head>
+    <title>Drive Copier</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f5f8fd;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            padding: 30px 40px;
+            border-radius: 12px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 500px;
+            text-align: center;
+        }
+
+        h2 {
+            margin-bottom: 20px;
+            color: #1a73e8;
+        }
+
+        label {
+            font-weight: 500;
+            display: block;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 15px;
+            margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #1a73e8;
+            color: white;
+            padding: 12px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        button:hover {
+            background: #155ac6;
+        }
+
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .footer img {
+            width: 300px;
+            border-radius: 50%;
+            margin-top: 10px;
+            height:300px;
+        }
+
+        .footer h1 {
+            font-size: 20px;
+            color: #444;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
         <h2>Google Drive Folder Copier</h2>
         <form action="/copy" method="post">
             <label>Paste Source Folder Link or ID:</label>
             <input name="src_folder" type="text">
             <button type="submit">Copy to My Drive</button>
         </form>
-    </body>
-    </html>
+    </div>
+
+    <div class="footer">
+        <h1>Created By Mr Shah</h1>
+        <img src="https://skillspectrum.vercel.app/Hamza.jpg" alt="Mr Shah">
+    </div>
+</body>
+</html>
     '''
 
 @app.route('/authorize')
