@@ -22,7 +22,7 @@ Session(app)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
-REDIRECT_URI = 'http://localhost:5000/oauth2callback'
+REDIRECT_URI = 'https://drive2drive.koyeb.app/oauth2callback'
 
 # Build OAuth flow
 def build_flow():
