@@ -2,7 +2,7 @@ import threading
 import time
 import os
 import re
-from flask import Flask, redirect, request, session, url_for
+from flask import Flask, redirect, request, session, url_for, jsonify
 from flask_session import Session
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -20,13 +20,11 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_PERMANENT'] = False
 Session(app)
 
-# Allow HTTP for local testing only (disable in production!)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
-REDIRECT_URI = os.getenv("REDIRECT_URI")  # Use env variable
+REDIRECT_URI = os.getenv("REDIRECT_URI")
 
-# Build the OAuth flow for authentication
 def build_flow():
     return Flow.from_client_config(
         {
@@ -59,17 +57,44 @@ def index():
                 .then(data => {
                     const status = document.getElementById("status");
                     if (data.status === "done") {
-                        status.innerHTML = "<h3>✅ Folder copied successfully to your Drive!</h3>";
+                        status.innerHTML = "<h3>✅ Folder copied successfully!</h3>";
+                        clearInterval(animInterval);
                     } else if (data.status === "error") {
                         status.innerHTML = "<p>❌ Error: " + data.message + "</p>";
+                        clearInterval(animInterval);
                     } else {
-                        setTimeout(checkStatus, 2000); // poll again
+                        status.innerHTML = `
+                            <p>🔄 Copying in progress... (${data.copied}/${data.total})</p>
+                            <div style="display:flex; justify-content:center; gap: 30px;">
+                                <div class="folder" id="folder1">📁</div>
+                                <div class="file" id="file">📄</div>
+                                <div class="folder" id="folder2">📁</div>
+                            </div>
+                        `;
                     }
                 });
         }
+
+        let animInterval;
+
+        function animateFile() {
+            const file = document.getElementById("file");
+            if (!file) return;
+            let toggle = true;
+            animInterval = setInterval(() => {
+                file.style.transform = toggle ? "translateX(100px)" : "translateX(0px)";
+                file.style.transition = "transform 1s";
+                toggle = !toggle;
+            }, 2000);
+        }
+
+        setTimeout(() => {
+            checkStatus();
+            animateFile();
+            setInterval(checkStatus, 5000);
+        }, 2000);
     </script>
     <style>
-        /* Styling for the page */
         body {
             font-family: 'Segoe UI', sans-serif;
             background: #f5f8fd;
@@ -137,13 +162,22 @@ def index():
             width: 300px;
             border-radius: 50%;
             margin-top: 10px;
-            height:300px;
+            height: 300px;
         }
 
         .footer h1 {
             font-size: 20px;
             color: #444;
             margin: 0;
+        }
+
+        .file {
+            font-size: 40px;
+            transition: transform 1s;
+        }
+
+        .folder {
+            font-size: 40px;
         }
     </style>
 </head>
@@ -177,7 +211,6 @@ def authorize():
 def oauth2callback():
     if 'state' not in session:
         return "Session expired. <a href='/'>Try again</a>.", 400
-
     flow = build_flow()
     flow.fetch_token(authorization_response=request.url)
     session['credentials'] = credentials_to_dict(flow.credentials)
@@ -185,10 +218,12 @@ def oauth2callback():
 
 @app.route('/status')
 def status():
-    return {
+    return jsonify({
         "status": session.get("copy_status", "idle"),
-        "message": session.get("copy_message", "")
-    }
+        "message": session.get("copy_message", ""),
+        "copied": session.get("copied_files", 0),
+        "total": session.get("total_files", 0)
+    })
 
 @app.route('/copy', methods=['POST'])
 def copy():
@@ -197,12 +232,13 @@ def copy():
 
     session['copy_status'] = 'in_progress'
     session['copy_message'] = ''
+    session['copied_files'] = 0
+    session['total_files'] = 0
 
     credentials = Credentials(**session['credentials'])
     drive = build('drive', 'v3', credentials=credentials)
     src_id = extract_folder_id(request.form['src_folder'])
 
-    # Run the copy process in the background to not block the request
     threading.Thread(target=start_copy, args=(drive, src_id)).start()
 
     return '''
@@ -212,6 +248,8 @@ def copy():
 
 def start_copy(drive, src_id):
     try:
+        total = count_files(drive, src_id)
+        session['total_files'] = total
         copy_folder_contents(drive, drive, src_id, 'root')
         session['copy_status'] = 'done'
     except Exception as e:
@@ -252,6 +290,30 @@ def copy_folder_contents(src_service, dst_service, src_folder_id, dst_parent_id)
                 'parents': [dst_folder_id]
             }
             dst_service.files().copy(fileId=item['id'], body=file_metadata).execute()
+            session['copied_files'] = session.get('copied_files', 0) + 1
+
+def count_files(drive, folder_id):
+    query = f"'{folder_id}' in parents and trashed = false"
+    total = 0
+    page_token = None
+
+    while True:
+        response = drive.files().list(
+            q=query,
+            fields="nextPageToken, files(id, mimeType)",
+            pageToken=page_token
+        ).execute()
+        items = response.get('files', [])
+        for item in items:
+            if item['mimeType'] == 'application/vnd.google-apps.folder':
+                total += count_files(drive, item['id'])
+            else:
+                total += 1
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            break
+
+    return total
 
 def extract_folder_id(link_or_id):
     match = re.search(r'/folders/([a-zA-Z0-9_-]+)', link_or_id)
