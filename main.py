@@ -1,8 +1,8 @@
 import threading
-import time
 import os
 import re
-from flask import Flask, redirect, request, session, url_for, jsonify
+import time
+from flask import Flask, redirect, request, session, url_for, jsonify, copy_current_request_context
 from flask_session import Session
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -14,8 +14,6 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
-
-# Flask-Session config
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_PERMANENT'] = False
 Session(app)
@@ -24,6 +22,13 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 REDIRECT_URI = os.getenv("REDIRECT_URI")
+
+copy_status = {
+    "status": "idle",
+    "message": "",
+    "copied_files": 0,
+    "total_files": 0
+}
 
 def build_flow():
     return Flow.from_client_config(
@@ -47,112 +52,75 @@ def index():
     if 'credentials' not in session:
         return redirect(url_for('authorize'))
     return '''
-<html>
-<head>
-    <title>Drive Copier</title>
-    <script>
-        function checkStatus() {
-            fetch('/status')
-                .then(response => response.json())
-                .then(data => {
-                    const status = document.getElementById("status");
-                    if (data.status === "done") {
-                        status.innerHTML = "<h3>✅ Folder copied successfully!</h3>";
-                        clearInterval(animInterval);
-                    } else if (data.status === "error") {
-                        status.innerHTML = "<p>❌ Error: " + data.message + "</p>";
-                        clearInterval(animInterval);
-                    } else {
-                        status.innerHTML = `
-                            <p>🔄 Copying in progress... (${data.copied}/${data.total})</p>
-                            <div style="display:flex; justify-content:center; gap: 30px;">
-                                <div class="folder" id="folder1">📁</div>
-                                <div class="file" id="file">📄</div>
-                                <div class="folder" id="folder2">📁</div>
-                            </div>
-                        `;
-                    }
-                });
-        }
-
-        let animInterval;
-
-        function animateFile() {
-            const file = document.getElementById("file");
-            if (!file) return;
-            let toggle = true;
-            animInterval = setInterval(() => {
-                file.style.transform = toggle ? "translateX(100px)" : "translateX(0px)";
-                file.style.transition = "transform 1s";
-                toggle = !toggle;
-            }, 2000);
-        }
-
-        setTimeout(() => {
-            checkStatus();
-            animateFile();
-            setInterval(checkStatus, 5000);
-        }, 2000);
-    </script>
-    <style>
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: #f5f8fd;
-            color: #333;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-        }
-
-        .container {
-            background: white;
-            padding: 30px 40px;
-            border-radius: 12px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            width: 500px;
-            text-align: center;
-        }
-
-        h2 {
-            margin-bottom: 20px;
-            color: #1a73e8;
-        }
-
-        label {
-            font-weight: 500;
-            display: block;
-            margin-bottom: 8px;
-            text-align: left;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 10px 14px;
-            border-radius: 6px;
-            border: 1px solid #ccc;
-            font-size: 15px;
-            margin-bottom: 20px;
-            box-sizing: border-box;
-        }
-
-        button {
-            background: #1a73e8;
-            color: white;
-            padding: 12px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background 0.3s ease;
-        }
-
-        button:hover {
-            background: #155ac6;
-        }
-
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Drive2Drive</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background: linear-gradient(to right, #4facfe, #00f2fe);
+                color: #333;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+            }
+            .container {
+                background: #fff;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                padding: 30px;
+                max-width: 500px;
+                width: 100%;
+                text-align: center;
+            }
+            h1 {
+                color: #4caf50;
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                margin-bottom: 10px;
+                font-size: 16px;
+                font-weight: bold;
+                color: #555;
+            }
+            input[type="text"] {
+                width: 100%;
+                padding: 10px;
+                margin-bottom: 20px;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            button {
+                background: linear-gradient(to right, #4caf50, #8bc34a);
+                color: #fff;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                font-size: 16px;
+                cursor: pointer;
+                transition: background 0.3s ease;
+            }
+            button:hover {
+                background: linear-gradient(to right, #43a047, #7cb342);
+            }
+            a {
+                text-decoration: none;
+                color: #007bff;
+                font-weight: bold;
+                margin-top: 20px;
+                display: inline-block;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
         .footer {
             margin-top: 30px;
             text-align: center;
@@ -170,34 +138,24 @@ def index():
             color: #444;
             margin: 0;
         }
-
-        .file {
-            font-size: 40px;
-            transition: transform 1s;
-        }
-
-        .folder {
-            font-size: 40px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>Google Drive Folder Copier</h2>
-        <form action="/copy" method="post" onsubmit="document.getElementById('status').innerHTML = '<p>🔄 Copying in progress...</p><p>Please wait...</p>'; setTimeout(checkStatus, 2000);">
-            <label>Paste Source Folder Link or ID:</label>
-            <input name="src_folder" type="text" required>
-            <button type="submit">Copy to My Drive</button>
-        </form>
-        <div id="status" style="margin-top: 20px;"></div>
-    </div>
-
-    <div class="footer">
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Welcome to Drive2Drive</h1>
+            <form action="/copy" method="post">
+                <label for="src_folder">Source Folder Link or ID:</label>
+                <input type="text" id="src_folder" name="src_folder" placeholder="Enter Google Drive folder link or ID" required>
+                <button type="submit">Start Copy</button>
+            </form>
+            <p><a href="/status">Check Copy Status</a></p>
+             <div class="footer">
         <h1>Created By Mr Shah</h1>
         <img src="https://skillspectrum.vercel.app/Hamza.jpg" alt="Mr Shah">
     </div>
-</body>
-</html>
+        </div>
+    </body>
+    </html>
     '''
 
 @app.route('/authorize')
@@ -218,11 +176,109 @@ def oauth2callback():
 
 @app.route('/status')
 def status():
+    return '''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Copy Status</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background: linear-gradient(to right, #4facfe, #00f2fe);
+                color: #333;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+            }
+            .container {
+                background: #fff;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                padding: 20px;
+                max-width: 500px;
+                width: 100%;
+                text-align: center;
+            }
+            h1 {
+                color: #4caf50;
+                margin-bottom: 20px;
+            }
+            p {
+                margin: 10px 0;
+                font-size: 16px;
+            }
+            .progress-bar-container {
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                width: 100%;
+                height: 20px;
+                background-color: #f3f3f3;
+                overflow: hidden;
+                margin: 20px 0;
+            }
+            .progress-bar {
+                height: 100%;
+                background: linear-gradient(to right, #4caf50, #8bc34a);
+                width: 0%;
+                transition: width 0.5s ease;
+            }
+            a {
+                text-decoration: none;
+                color: #007bff;
+                font-weight: bold;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+        </style>
+        <script>
+            function fetchStatus() {
+                fetch('/status_json')
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('status').innerText = data.status;
+                        document.getElementById('message').innerText = data.message;
+                        document.getElementById('copied_files').innerText = data.copied_files;
+                        document.getElementById('total_files').innerText = data.total_files;
+                        document.getElementById('progress_bar').style.width = data.progress + '%';
+                    })
+                    .catch(error => console.error('Error fetching status:', error));
+            }
+            window.onload = fetchStatus;
+            setInterval(fetchStatus, 2000);
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Copy Status</h1>
+            <p><strong>Status:</strong> <span id="status"></span></p>
+            <p><strong>Message:</strong> <span id="message"></span></p>
+            <p><strong>Copied Files:</strong> <span id="copied_files">0</span> / <span id="total_files">0</span></p>
+            <div class="progress-bar-container">
+                <div id="progress_bar" class="progress-bar"></div>
+            </div>
+            <p><a href="/">Go Back to Home</a></p>
+        </div>
+    </body>
+    </html>
+    '''
+
+@app.route('/status_json')
+def status_json():
+    total_files = copy_status.get("total_files", 0)
+    copied_files = copy_status.get("copied_files", 0)
+    progress = (copied_files / total_files * 100) if total_files > 0 else 0
     return jsonify({
-        "status": session.get("copy_status", "idle"),
-        "message": session.get("copy_message", ""),
-        "copied": session.get("copied_files", 0),
-        "total": session.get("total_files", 0)
+        "status": copy_status.get("status"),
+        "message": copy_status.get("message"),
+        "copied_files": copied_files,
+        "total_files": total_files,
+        "progress": round(progress, 2)
     })
 
 @app.route('/copy', methods=['POST'])
@@ -230,31 +286,38 @@ def copy():
     if 'credentials' not in session:
         return redirect(url_for('authorize'))
 
-    session['copy_status'] = 'in_progress'
-    session['copy_message'] = ''
-    session['copied_files'] = 0
-    session['total_files'] = 0
+    # Reset shared state
+    copy_status.update({
+        "status": "in_progress",
+        "message": "Initializing...",
+        "copied_files": 0,
+        "total_files": 0
+    })
 
     credentials = Credentials(**session['credentials'])
     drive = build('drive', 'v3', credentials=credentials)
     src_id = extract_folder_id(request.form['src_folder'])
 
-    threading.Thread(target=start_copy, args=(drive, src_id)).start()
+    @copy_current_request_context
+    def thread_target():
+        start_copy(drive, src_id)
 
-    return '''
-        <p>🔄 Copying in progress... Please wait...</p>
-        <script>setTimeout(() => checkStatus(), 2000);</script>
-    '''
+    threading.Thread(target=thread_target).start()
+
+    return redirect(url_for('status'))
 
 def start_copy(drive, src_id):
     try:
-        total = count_files(drive, src_id)
-        session['total_files'] = total
+        copy_status["message"] = "Counting files..."
+        total_files = count_files(drive, src_id)
+        copy_status["total_files"] = total_files
+        copy_status["message"] = f"{total_files} files found. Starting copy..."
         copy_folder_contents(drive, drive, src_id, 'root')
-        session['copy_status'] = 'done'
+        copy_status["status"] = "done"
+        copy_status["message"] = "Copy completed successfully."
     except Exception as e:
-        session['copy_status'] = 'error'
-        session['copy_message'] = str(e)
+        copy_status["status"] = "error"
+        copy_status["message"] = str(e)
 
 def copy_folder_contents(src_service, dst_service, src_folder_id, dst_parent_id):
     folder_meta = src_service.files().get(fileId=src_folder_id, fields='name').execute()
@@ -285,12 +348,10 @@ def copy_folder_contents(src_service, dst_service, src_folder_id, dst_parent_id)
         if item['mimeType'] == 'application/vnd.google-apps.folder':
             copy_folder_contents(src_service, dst_service, item['id'], dst_folder_id)
         else:
-            file_metadata = {
-                'name': item['name'],
-                'parents': [dst_folder_id]
-            }
+            file_metadata = {'name': item['name'], 'parents': [dst_folder_id]}
             dst_service.files().copy(fileId=item['id'], body=file_metadata).execute()
-            session['copied_files'] = session.get('copied_files', 0) + 1
+            copy_status["copied_files"] += 1
+            copy_status["message"] = f"Copied {item['name']}"
 
 def count_files(drive, folder_id):
     query = f"'{folder_id}' in parents and trashed = false"
